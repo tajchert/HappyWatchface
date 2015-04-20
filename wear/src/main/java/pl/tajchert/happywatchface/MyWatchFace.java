@@ -22,7 +22,9 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Resources;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.os.Bundle;
@@ -30,9 +32,15 @@ import android.os.Handler;
 import android.os.Message;
 import android.support.wearable.watchface.CanvasWatchFaceService;
 import android.support.wearable.watchface.WatchFaceStyle;
+import android.text.Layout;
+import android.text.StaticLayout;
+import android.text.TextPaint;
 import android.text.format.Time;
+import android.util.Log;
+import android.view.Display;
 import android.view.SurfaceHolder;
 import android.view.WindowInsets;
+import android.view.WindowManager;
 
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
@@ -42,6 +50,13 @@ import java.util.concurrent.TimeUnit;
  * low-bit ambient mode, the text is drawn without anti-aliasing in ambient mode.
  */
 public class MyWatchFace extends CanvasWatchFaceService {
+    private static final String TAG = "MyWatchFace";
+    private static long timeTurningOn = 0;
+    private static long timeToShowText = 2000;
+
+    private int screenWidthPX;
+    private int screenHeightPX;
+
     private static final Typeface NORMAL_TYPEFACE = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL);
 
     /**
@@ -77,6 +92,13 @@ public class MyWatchFace extends CanvasWatchFaceService {
                 }
             }
         };
+        final Handler handleDelayTime = new Handler();
+        final Runnable runnableShowTime = new Runnable() {
+            @Override
+            public void run() {
+                registerReceiver();
+            }
+        };
 
         final BroadcastReceiver mTimeZoneReceiver = new BroadcastReceiver() {
             @Override
@@ -90,6 +112,7 @@ public class MyWatchFace extends CanvasWatchFaceService {
 
         Paint mBackgroundPaint;
         Paint mTextPaint;
+        TextPaint mQuotePaint;
 
         boolean mAmbient;
 
@@ -121,7 +144,15 @@ public class MyWatchFace extends CanvasWatchFaceService {
 
             mTextPaint = new Paint();
             mTextPaint = createTextPaint(resources.getColor(R.color.digital_text));
+            mQuotePaint = new TextPaint();
+            mQuotePaint.setTextSize(40);
+            mQuotePaint.setColor(Color.WHITE);
+            mQuotePaint.setAntiAlias(true);
+            mQuotePaint.setSubpixelText(true);
+            mQuotePaint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.ITALIC));
 
+            WindowManager wm = (WindowManager) MyWatchFace.this.getSystemService(Context.WINDOW_SERVICE);
+            getScreenSize(wm);
             mTime = new Time();
         }
 
@@ -144,14 +175,16 @@ public class MyWatchFace extends CanvasWatchFaceService {
             super.onVisibilityChanged(visible);
 
             if (visible) {
+                timeTurningOn = System.currentTimeMillis();
                 registerReceiver();
-
+                //handleDelayTime.postDelayed(runnableShowTime, 2000);
                 // Update time zone in case it changed while we weren't visible.
                 mTime.clear(TimeZone.getDefault().getID());
                 mTime.setToNow();
             } else {
                 unregisterReceiver();
             }
+            Log.d(TAG, "onVisibilityChanged :" + visible);
 
             // Whether the timer should be running depends on whether we're visible (as well as
             // whether we're in ambient mode), so we may need to start or stop the timer.
@@ -204,11 +237,13 @@ public class MyWatchFace extends CanvasWatchFaceService {
 
         @Override
         public void onAmbientModeChanged(boolean inAmbientMode) {
+            Log.d(TAG, "onAmbientModeChanged inAmbientMode:" + inAmbientMode);
             super.onAmbientModeChanged(inAmbientMode);
             if (mAmbient != inAmbientMode) {
                 mAmbient = inAmbientMode;
                 if (mLowBitAmbient) {
                     mTextPaint.setAntiAlias(!inAmbientMode);
+                    mQuotePaint.setAntiAlias(!inAmbientMode);
                 }
                 invalidate();
             }
@@ -225,10 +260,16 @@ public class MyWatchFace extends CanvasWatchFaceService {
 
             // Draw H:MM in ambient mode or H:MM:SS in interactive mode.
             mTime.setToNow();
-            String text = mAmbient
-                    ? String.format("%d:%02d", mTime.hour, mTime.minute)
-                    : String.format("%d:%02d:%02d", mTime.hour, mTime.minute, mTime.second);
-            canvas.drawText(text, mXOffset, mYOffset, mTextPaint);
+            if(System.currentTimeMillis() - timeTurningOn > timeToShowText) {
+                String text = mAmbient
+                        ? String.format("%d:%02d", mTime.hour, mTime.minute)
+                        : String.format("%d:%02d", mTime.hour, mTime.minute);
+                canvas.drawText(text, mXOffset, mYOffset, mTextPaint);
+            } else {
+                StaticLayout layout = new StaticLayout("The happy know no hours.", mQuotePaint, (screenWidthPX-30), Layout.Alignment.ALIGN_CENTER, 1.0f, 0, false);
+                canvas.translate((canvas.getWidth() / 2) - (layout.getWidth() / 2), (canvas.getHeight() / 2) - ((layout.getHeight() / 2)) + 20);
+                layout.draw(canvas);
+            }
         }
 
         /**
@@ -249,5 +290,13 @@ public class MyWatchFace extends CanvasWatchFaceService {
         private boolean shouldTimerBeRunning() {
             return isVisible() && !isInAmbientMode();
         }
+    }
+
+    private void getScreenSize(WindowManager wm) {
+        Display display = wm.getDefaultDisplay();
+        Point size = new Point();
+        display.getSize(size);
+        screenWidthPX = size.x;
+        screenHeightPX = size.y;
     }
 }
